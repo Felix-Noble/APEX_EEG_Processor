@@ -23,9 +23,12 @@ class EEG_Processor:
         self.error_ext = error_ext
         self.temporal_res_header = temporal_res[0]
         self.temporal_res_freq = np.float64(temporal_res[1])
-        self.BESA_evt_header = "{}          \tCode\tTriNo\tComnt\n".format(
-            self.temporal_res_header)  # default time res = Tms (Time in miliseconds)
+        """
+                BESA filetype line formats:
+                """
+        self.BESA_evt_header = "{}          \tCode\tTriNo\tComnt\n".format(self.temporal_res_header)
         self.BESA_evt_line = "{0:<10}\t{1}\t{2}\t{3} {4} {5:<30}\n"  # format of lines in the .evt file.
+        self.epochs_format = '{}.0 {}.0 {}.0 {}.0\t{}.0 {}.0 {}.0\t{}.0\t{}.0\n'
 
         self.supported_filetypes = {
             '.fif': mne.io.read_raw_fif,
@@ -324,7 +327,11 @@ class EEG_Processor:
             ---
                         """.format(self.get_main_filename(save_file), self.write_dir))
 
-    def write_paradigm(self, event_id, main_filename='Master paradigm', write_names=True, write_filter_for_artefact=True):
+    def write_paradigm(self, event_id, main_filename='Master paradigm', write_names=True,
+                       write_filter_for_artefact=True,
+                       epoch_avg=(-100, 500), epoch_baseline=(-100, 0), epoch_artifact=(-100, 500),
+                       epoch_stim_artifact=(0, 0), epoch_stim_delay=0):
+
         filename_format = '{}{}'
         filename = filename_format.format(main_filename, self.paradigm_ext)
         save_dir = r'{}\{}'.format(self.write_dir, filename)
@@ -339,16 +346,20 @@ class EEG_Processor:
             for key, value in event_id.items():
                 file.write('{}\t{}\n'.format(value, key))
             file.write('\n')
-            #conditions = []
+            # conditions = []
             file.write('[Names]\n')
             if write_names:
                 names = ''
                 for i, id in enumerate(event_id.keys()):
                     names += '{}\t\n'.format(id)
                 file.write(names)
-                    #conditions.append(id)
+                # conditions.append(id)
             file.write('\n')
             file.write('[Epochs]\n')
+            for x in event_id.keys():
+                file.write(self.epochs_format.format(epoch_avg[0], epoch_avg[1], epoch_baseline[0],
+                                                     epoch_baseline[1], epoch_artifact[0], epoch_artifact[1],
+                                                     epoch_stim_artifact[0], epoch_stim_artifact[1], epoch_stim_delay))
             file.write('\n')
             file.write('[Thresholds]\n')
             file.write('\n')
@@ -356,9 +367,13 @@ class EEG_Processor:
             file.write('\n')
             file.write('[Filter]\n')
             if write_filter_for_artefact:
-                for x in range(0, 6):
-                    file.write('\n')
-                file.write('TRUE\t\tTRUE')
+                file.write("0.100000\t0\t1\t1\n")
+                file.write("50.000000\t1\t0\t1\n")
+                file.write("60.000000\t2.000000\tTRUE\n")
+                file.write("80.000000\t5.000000\tFALSE\n)")
+                file.write("FALSE\tFALSE\n)")
+                file.write("FALSE\tFALSE\tFALSE\n)")
+                file.write('TRUE\t\tTRUE\n')
             file.write('\n')
             file.write('[TimeFrequency]\n')
             file.write('\n')
