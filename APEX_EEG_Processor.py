@@ -127,7 +127,8 @@ class EEG_Processor:
             return None
         return raw
 
-    def read_raw_info(self, file):
+    def read_raw_info(self, file): #TODO add in a messenger function
+        print('Reading info from {}'.format(self.get_main_filename(file)))
         raw_loaded = False
         main_filename = self.get_main_filename(file)
         evt_filename = '{}-EVT.npy'.format(os.path.join(self.read_dir, main_filename))
@@ -146,7 +147,7 @@ class EEG_Processor:
 
         else:
             if raw_loaded is not True:
-                raw = AP.read_raw_file(file)
+                raw = self.read_raw_file(file)
 
             info = {'raw.info': {key: value for key, value in raw.info.items()},
                     'n_times': raw.n_times,
@@ -323,7 +324,7 @@ class EEG_Processor:
             ---
                         """.format(self.get_main_filename(save_file), self.write_dir))
 
-    def write_paradigm(self, event_id, main_filename='Master paradigm', write_names=True):
+    def write_paradigm(self, event_id, main_filename='Master paradigm', write_names=True, write_filter_for_artefact=True):
         filename_format = '{}{}'
         filename = filename_format.format(main_filename, self.paradigm_ext)
         save_dir = r'{}\{}'.format(self.write_dir, filename)
@@ -354,6 +355,10 @@ class EEG_Processor:
             file.write('[Averaging]\n')
             file.write('\n')
             file.write('[Filter]\n')
+            if write_filter_for_artefact:
+                for x in range(0, 6):
+                    file.write('\n')
+                file.write('TRUE\t\tTRUE')
             file.write('\n')
             file.write('[TimeFrequency]\n')
             file.write('\n')
@@ -368,7 +373,15 @@ class EEG_Processor:
         {}   
         Paradigm written to \033[93m{}\033[0m in \033[92m{}\033[0m
                         """.format(datetime.now(), filename, save_dir))
+    def get_subject_event_id(self, events, event_id):
+        subject_event_id = {}
+        event_id_name = self.cat_events(event_id)
 
+        for event in events:
+            if event_id_name[event[2]] not in subject_event_id.keys():
+                subject_event_id[event_id_name[event[2]]] = event[2]
+
+        return subject_event_id
     def BESA_evt_export(self, events, event_id, file_dir, write=True, write_names=True):
         """
         exports evt and PDG files for sorted events to be read by BESA
@@ -380,13 +393,10 @@ class EEG_Processor:
         main_filename = self.get_main_filename(file_dir)
         # evt_filename = '{}{}'.format(main_filename, self.evt_ext)
         # paradigm_filename = '{}{}'.format(main_filename, self.paradigm_ext)
-        event_id_name = self.cat_events(event_id)
         print(event_id)
         print(events)
-        event_id_cropped = {}
-        for event in events:
-            if event_id_name[event[2]] not in event_id_cropped.keys():
-                event_id_cropped[event_id_name[event[2]]] = event[2]
+        subject_event_id = self.get_subject_event_id(events, event_id)
+        event_id_cropped = subject_event_id
 
         #print(len(event_id), len(event_id_cropped))
         formatted_events = []
@@ -406,7 +416,8 @@ class EEG_Processor:
         if self.error_halt:
             input("\033[91mERROR DETECTED!\033[0m halting...            : ")
     
-    def sort_events_MOT_BESA(self, events, event_id_name):
+    def sort_events_MOT_BESA(self, events, event_id_name, sfreq=1000):
+        self.current_sfreq = sfreq
         trial_block_format = '{}-Tr{}>{}{}'
         corr_desig, miss_desig = '+CR', 'MS'
         lvl_lss_format, lvl_great_format = '{}-lvl<={}{}', '{}-lvl>={}{}'
@@ -471,7 +482,9 @@ class EEG_Processor:
                         block = round(block_flt-0.50001)
 
                         new_evt_name_trial = trial_block_format.format(evt_name, block*trial_block_size, (block+1)*trial_block_size, corr_or_miss)
-                        new_evt_sample = events[index+1][0]
+                        sample = np.float64(event[0])
+                        orders_of_mag = self.temporal_res_freq / self.current_sfreq
+                        new_evt_sample = np.int64(sample * orders_of_mag)
                         new_evt_change_val = events[index+1][1]
                         new_evt_trial = np.array([new_evt_sample, new_evt_change_val, new_event_id[new_evt_name_trial]], dtype=np.int64)
                         new_events.append(new_evt_trial)
@@ -487,8 +500,47 @@ class EEG_Processor:
                             new_events.append(new_evt_lvl)
 
         return new_events, new_event_id
-    
-    def sort_events_MOT(self, events, event_id_name, raw):
+    def master_event_id_MOT(self):
+        new_event_id = {}  # creates new event_id dict and assigns the 'correct, no misses' event to id:30
+
+        # contains all prefixes to event codes, X=Fixation, F=Flash,
+        # G=Move_0 (GO), S=Move_1 (STOP), I=Space_bar (INPUT)
+        self.event_letter_codes = ["X", "F", 'G', 'S', "I"]
+        event_letter_codes = self.event_letter_codes
+        rst_state_evts_old = [('eyec', 'eyeo')]
+        rst_state_evts = [('CLS0', 'CLS1'), ('CLS2', 'CLS3'), ('OPN0', 'OPN1'), ('OPN2', 'OPN3')]
+
+        ms_vals = []
+        # creates all event names/codes for each possible 'miss' value (NM, N missed out of  M targets) from 1/1 to 9/9
+        for x in range(2, 10):
+            for y in range(0, x):
+                miss_val = 'NM'
+                miss_val = miss_val.replace('N', str(y))
+                miss_val = miss_val.replace('M', str(x))
+                new_name = 'MS' + miss_val
+                ms_vals.append(new_name)
+
+        # creates all event names/codes for each prefix in 'event_letter_codes',
+        # from lvl 01 to 50, coding each for Correct (C) of Miss (M)
+        for i, letter in enumerate(event_letter_codes):
+            for x in range(1, 99):
+                trial = str(f'0{x}')
+                trial = trial[-2:]
+                for y in range(1, 99):
+                    lvl = str(f'0{y}')
+                    lvl = lvl[-2:]
+                    evt_name = f'{letter}_{lvl}_{trial}_CR00'
+                    new_event_id[evt_name] = len(new_event_id) + 1
+                    for ms_val in ms_vals:
+                        evt_name = f'{letter}_{lvl}_{trial}_{ms_val}'
+                        new_event_id[evt_name] = len(new_event_id) + 1
+
+        for x in range(0, 10):
+            new_event_id["ERR" + str(x)] = len(new_event_id) + 1
+
+        return new_event_id
+
+    def sort_events_MOT(self, events, event_id_name, sfreq=1000):
         """
         every 20 trials, separate bin
         lvl 13 below lvl 14 and above
@@ -505,120 +557,93 @@ class EEG_Processor:
         :return new_event_id: dictionary of event_id's for all expected values of the new events.
         WARNING: not all events will be in this dict, create specific id dict for each event set for use in mne.
         """
-        self.current_file = raw
-        self.current_sfreq = np.float64(raw.info['sfreq'])
-
-        lvls_played = 0
+        self.din_times = []
+        self.current_sfreq = sfreq
+        corr_miss = False
+        CRMS_errors, DIN_errors = 0, 0
+        trial_count = 0
         new_events = []
-        new_event_id = {'CR00': 30,'EROR': 889}  # creates new event_id dict and assigns the 'correct, no misses' event to id:30
+        self.master_event_id = self.master_event_id_MOT()
+        event_letter_codes = self.event_letter_codes
 
-        # contains all prefixes to event codes, X=Fixation, F=Flash,
-        # G=Move_0 (GO), S=Move_1 (STOP), I=Space_bar (INPUT)
-        event_letter_codes = ["X", "F", 'G', 'S', "I"]
-
-        # Encodes 10 possible error states, (0-9), 1-9 are tbd. Max value of BESA trigger_no is 899
-        EROR_index = 890
-        for x in range(0, 10):
-            new_event_id["ERR" + str(x)] = EROR_index + x
-
-        # creates all event names/codes for each possible 'miss' value (NM, N missed out of  M targets) from 1/1 to 9/9
-        MS_index = 40
-        for x in range(2, 10):
-            for y in range(0, x):
-                miss_val = 'NM'
-                miss_val = miss_val.replace('N', str(y))
-                miss_val = miss_val.replace('M', str(x))
-                new_name = 'MS' + miss_val
-                new_event_id[new_name] = MS_index
-                MS_index += 1
-
-        # creates all event names/codes for each prefix in 'event_letter_codes',
-        # from lvl 01 to 50, coding each for Correct (C) of Miss (M)
-        for i, letter in enumerate(event_letter_codes):
-            id_base = (i + 1) * 100
-            for x in range(id_base + 1, id_base + 51):
-                lvl = str(x / 100) + '0'
-                lvl = lvl[2:4]
-                new_name = letter + lvl + 'C'
-                new_event_id[new_name] = x
-            x -= 49
-            for y in range(x + 50, x + 100):
-                lvl = str(x / 100) + '0'
-                lvl = lvl[2:4]
-                new_name = letter + lvl + 'M'
-                new_event_id[new_name] = y
-                x += 1
+        new_event_id = self.master_event_id
+        new_event_id_name = self.cat_events(new_event_id)
 
         # scrubs events list for information, collecting the location of fixation, flash, move1, move0,
         # and space_bar, writes new events that encode these events at their DIN1 signal (actual screen refresh time)
         # alongside lvl, corr/miss and if missed, n out of m targets
-        index_dict = {"fix_index": None, "flash_index": None, "mve0_index": None, "mve1_index": None,
-                      "input_index": None}
+
+        index_dict = {"FX": None, "FLSH": None, "MVE0": None, "MVE1": None, 'SPCE': None}
+
         for i, event in enumerate(events):
             index_dict.update((k, None) for k in index_dict.keys())
-            if event_id_name[event[2]].startswith("FX"):
-                lvls_played += 1
-                index_dict['fix_index'] = i
-                lvl_code = event_id_name[event[2]][2:4]
-                lvl = lvl_code.replace('F', '')
+            evt_id = event[2]
+            evt_name = event_id_name[evt_id]
+            for key in index_dict.keys():
+                if evt_name.startswith(key):
+                    index_dict[key] = i
+
+            fx_index = index_dict['FX']
+            if fx_index is not None:
+                corr_miss = False
+                trial_count += 1
+                lvl = evt_name.replace('F', '')
                 lvl = lvl.replace('X', '')
-                if len(lvl) == 1:
-                    lvl = '0' + lvl
-                for j, check in enumerate(events[index_dict['fix_index'] + 1:]):
-                    if event_id_name[check[2]].startswith('CRC'):
-                        miss_data_name = 'CR00'
-                        corr_or_miss = 'C'
+                lvl = f'0{lvl}'[-2:]
+                for j, c_m_evt in enumerate(events[fx_index:fx_index+100]):
+                    curr_samp = c_m_evt[0]
+                    fx_samp = events[fx_index][0]
+                    t_diff = (curr_samp - fx_samp)/sfreq
+                    if t_diff <= 17:
+                        evt_id = c_m_evt[2]
+                        c_m_name = event_id_name[evt_id]
+                        if c_m_name.startswith('CRC'):
+                            corr_miss = 'CR00'
+                            break
+                        elif c_m_name.startswith('MS'):
+                            corr_miss = c_m_name
+                            break
+                    else:
                         break
-                    elif event_id_name[check[2]].startswith('MS'):
-                        miss_data_name = event_id_name[check[2]]
-                        corr_or_miss = 'M'
-                        break
-            if event_id_name[event[2]].startswith("FLSH"):  # balls flash
-                index_dict['flash_index'] = i
-            if event_id_name[event[2]].startswith("MVE0"):  # movement starts
-                index_dict['mve0_index'] = i
-            if event_id_name[event[2]].startswith("MVE1"):  # movement ends
-                index_dict['mve1_index'] = i
-            if event_id_name[event[2]].startswith("SPCE"):  # user inputs answer (via space_bar)
-                index_dict['input_index'] = i
-            for i, key in enumerate(index_dict):  # CRUCIAL: index dict must contain the same number of items as event_letter_codes and
-                evt_index = index_dict[key]
-                if evt_index is not None:
-                    din_evt_index = evt_index + 1
-                    if event_id_name[events[din_evt_index][2]].startswith('DIN1'):
+                if not corr_miss:
+                    CRMS_errors += 1
 
-                        try:
-                            new_name = event_letter_codes[i] + lvl + corr_or_miss
-                        except UnboundLocalError:
-                            error_mssg = str(
-                                "\033[31m ERROR!: No lvl or crrct/miss found \033[0m file: {}, trial: {}, lvl: {}, evt_index: {}, sample: {}".format(
-                                    self.current_file, lvls_played, lvl, evt_index, events[evt_index][0]))
-                            self.error(error_mssg)
-                            new_name = 'EROR'
+            index = 0
+            if corr_miss is not False:
+                for key, value in index_dict.items():
+                    if value is not None:
+                        for j, din_evt in enumerate(events[value:value + 100]):
+                            curr_samp = din_evt[0]
+                            evt_samp = events[value][0]
+                            t_diff = (curr_samp - evt_samp) / sfreq
+                            if t_diff <= 0.3:
+                                evt_id = din_evt[2]
+                                evt_name = event_id_name[evt_id]
+                            else:
+                                DIN_errors += 1
+                                break
+                            if evt_name.startswith('DIN'):
+                                self.din_times.append(t_diff)
+                                din_sample = np.float64(din_evt[0])
+                                din_change = din_evt[1]
+
+                                trial = f'0{trial_count}'
+                                trial = trial[-2:]
+                                new_evt_name = f'{event_letter_codes[index]}_{lvl}_{trial}_{corr_miss}'
+                                new_evt_id = new_event_id[new_evt_name]
+                                orders_of_mag = 1000 / self.current_sfreq
+                                new_evt_sample = np.int64(din_sample * orders_of_mag)
+                                new_evt = np.array([new_evt_sample, din_change, new_evt_id], dtype=np.int64)
+                                new_events.append(new_evt)
+                                break
 
 
-                        new_evt_sample = events[din_evt_index][0]/self.current_sfreq * self.temporal_res_freq
-                        new_evt_sample = np.int64(new_evt_sample)
-                        new_evt_changevalue = events[din_evt_index][1]
 
-                        new_evt_id = new_event_id[new_name]
-                        new_evt = np.array([new_evt_sample, new_evt_changevalue, new_evt_id],
-                                           dtype=np.int64)  # preserves numpy array structure of mne events
-                        new_events.append(new_evt)
-                        try:
-                            miss_data_evt = np.array([new_evt_sample + 1, 0, new_event_id[miss_data_name]],
-                                                     dtype=np.int64)  # new event immediately after primary event, encoding exact miss_data
+                    index += 1
 
-                        except KeyError:
-                            miss_data_evt = np.array([new_evt_sample + 1, 0, 890])  # Error 1: KeyError in miss_event tag name. eg: MS02
-                            error_mssg = str("\033[31m ERROR!: Miss event takes wrong format in \033[0m file: {}, trial: {}, lvl: {}, evt_index: {}, sample: {}".format(
-                                    self.current_file, lvls_played, lvl, evt_index, events[evt_index][0]))
-                            self.error(error_mssg)
-
-                        new_events.append(miss_data_evt)
-        new_events = np.array(new_events)
-
-        return new_events, new_event_id
+        self.CRMS_errors, self.DIN_errors = CRMS_errors, DIN_errors
+        new_events_arr = np.vstack(new_events)
+        return new_events_arr, new_event_id
 
     def sort_events_Sleep(self, events, events_id_name, file_dir, target_form='Stimulus/S  {}', current_sfreq=10000):
         default_return = [], {}
@@ -727,7 +752,7 @@ class EEG_Processor:
 
         return new_events, new_event_id
 
-    def find_start_index_MOT(events_raw, rev_dict):
+    def find_start_index_MOT(self, events_raw, rev_dict):
         previous_events = []
         level_three_found = False
         din_max_found = False
