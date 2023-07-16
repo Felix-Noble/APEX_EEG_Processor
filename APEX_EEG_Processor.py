@@ -4,6 +4,7 @@ import numpy as np
 from pathlib import Path
 from datetime import datetime
 
+
 class EEG_Processor:
     def __init__(self, read_dir=None, write_dir=None, temporal_res=('Tmu', 1000000),
                  run=False, error_halt=False, load_file_list=False,
@@ -130,7 +131,7 @@ class EEG_Processor:
             return None
         return raw
 
-    def read_raw_info(self, file): #TODO add in a messenger function
+    def read_raw_info(self, file):  # TODO add in a messenger function
         print('Reading info from {}'.format(self.get_main_filename(file)))
         raw_loaded = False
         main_filename = self.get_main_filename(file)
@@ -258,6 +259,120 @@ class EEG_Processor:
                 event_id_name[value] = key
         return event_id_name
 
+    def group_events(self, event_id, evt=None, lvl=None, trial=None, corr_miss=None):
+        """
+        Function to group events based on specific criteria: event type, level, trial, and type of result.
+
+        Args:
+            event_id (dict): a dictionary where keys represent different event ids (as strings),
+            the structure is 'eventname_level_trial_result'.
+
+            evt (str, optional): the event name to match. If none provided, it does not filter by event.
+
+            lvl (int, tuple, list, optional): a specific level or a range of levels to match.
+            If it's a tuple or list, it represents a range OR multiple ranges.
+            eg., (1, 4) or [1, 4, 7, 10] will match levels 1 through 3, and 7 through 9.
+
+            trial (int, tuple, list, optional): a specific trial or a range of trials to match. Similar to lvl.
+
+            corr_miss (str, optional): two characters to match the type of result. If none provided, it does not filter by result.
+
+        Returns:
+            group (list): a list of all events from the input dictionary that meet the criteria.
+            If an event does not meet the criteria, it is excluded.
+        """
+        group = []
+
+        for ID in event_id.keys():
+            exclude_lvl, exclude_trial = False, False
+            # Splitting the event ID to get event name, level, trial and corr/miss result
+            evt_split = ID.split('_')
+            e_evt = evt_split[0]
+            e_lvl = int(evt_split[1])
+            e_trial = int(evt_split[2])
+            e_corr_miss = evt_split[3]
+
+            # Exclude event if event name or result do not match
+            if evt is not None:
+                if e_evt != evt:
+                    continue
+            if corr_miss is not None:
+                if e_corr_miss[0:2] != corr_miss[0:2]:
+                    continue
+
+            # Process level data
+            if type(lvl) in [tuple, list]:
+                # If lvl is a tuple or list, we assume it represents a range or multiple ranges
+                exclude_lvl = True
+                # Event is set to be excluded due to lvl by default
+                pairs = round((len(lvl) / 2) - 0.1)
+                for x in range(0, pairs):
+                    i = x * 2
+                    if lvl[i] <= e_lvl < lvl[i + 1]:
+                        # If current level is within range, we don't exclude
+                        exclude_lvl = False
+            elif type(lvl) == int and e_lvl != lvl:
+                # If level does not match the specified one, exclude event
+                continue
+
+            # Process trial data
+            if type(trial) in [tuple, list]:
+                # If trial is a tuple or list, we assume it represents a range or multiple ranges
+                exclude_trial = True
+                pairs = round((len(trial) / 2) - 0.1)
+                for x in range(0, pairs):
+                    i = x * 2
+                    if trial[i] <= e_trial < trial[i + 1]:
+                        # If current trial is within range, we don't exclude
+                        exclude_trial = False
+            elif type(trial) == int and e_trial != trial:
+                # If trial does not match the specified one, exclude event
+                continue
+
+            # If event is not excluded by any criteria, add it to the group
+            if exclude_trial is not True and exclude_lvl is not True:
+                if ID in event_id:
+                    group.append(event_id[ID])
+
+        return group
+
+    def epoch(self, data, events, event_groups, file, tmin=-0.2, tmax=1, save=True):
+        """
+        should recognise either a tuple/list of lists or a dictionary, giving either numerical names or names specified in the dict
+        """
+        for group in event_groups:
+            if len(group[1]) == 0:
+                continue
+            epoch = mne.Epochs(data, events, group[1], tmin, tmax, proj=True,
+                                    picks=('eeg', 'eog'), baseline=(tmin, tmin + 0.1), preload=True)
+            csv_path = r"C:\Users\Felix\Dropbox\My PC (LAPTOP-J41MAND4)\Users\Felix\Documents\Philosophy+\Cognitive science\Aptima Coding\data\epochs as csv"
+            epoch_df = epoch.to_data_frame()
+            filename = f'{self.get_main_filename(file)}-{group[0]}.csv'
+            epoch_df.to_csv(f'{csv_path}\{filename}', index=False)
+            print("""---
+                    {}   
+                    Epoch written to \033[93m{}\033[0m in \033[92m{}\033[0m
+                                    """.format(datetime.now(), filename, csv_path))
+    def get_max_trial(self, subject_event_id):
+        max_trial = 0
+        subject_event_id = dict(subject_event_id)
+        for event in subject_event_id.keys():
+            name_split = event.split('_')
+            trial = int(name_split[2])
+            if trial>max_trial:
+                max_trial = trial
+
+        return max_trial
+    def get_max_lvl(self, subject_event_id):
+        max_lvl = 0
+        subject_event_id = dict(subject_event_id)
+        for event in subject_event_id.keys():
+            name_split = event.split('_')
+            lvl = int(name_split[1])
+            if lvl > max_lvl:
+                max_lvl = lvl
+
+        return max_lvl
     def format_event(self, event, event_id_name, BESA_evt_code=1, event_comment='Trigger', comment_delim='-'):
         # Formats the events given into a single line of an evt file.
         # trigger_num is the trigger identifier BESA will use,
@@ -269,7 +384,7 @@ class EEG_Processor:
         trigger_no = event[2]  # the numeric code for the event that mne reads in
         evt_name = event_id_name[trigger_no]  # the name of the event
         formatted_evt = self.BESA_evt_line.format(evt_sample, BESA_evt_code, trigger_no, event_comment, comment_delim,
-                                               evt_name)
+                                                  evt_name)
 
         return formatted_evt
 
@@ -299,7 +414,7 @@ class EEG_Processor:
         save_dir = r'{}\{}'.format(self.write_dir, filename)
 
         if save_dir in os.listdir(self.write_dir) and overwrite is not True:
-            filename = filename_format.format(main_filename, '-NEW'+self.evt_ext)
+            filename = filename_format.format(main_filename, '-NEW' + self.evt_ext)
 
             save_dir = r'{}\{}'.format(self.write_dir, filename)
 
@@ -388,6 +503,7 @@ class EEG_Processor:
         {}   
         Paradigm written to \033[93m{}\033[0m in \033[92m{}\033[0m
                         """.format(datetime.now(), filename, save_dir))
+
     def get_subject_event_id(self, events, event_id):
         subject_event_id = {}
         event_id_name = self.cat_events(event_id)
@@ -397,6 +513,7 @@ class EEG_Processor:
                 subject_event_id[event_id_name[event[2]]] = event[2]
 
         return subject_event_id
+
     def BESA_evt_export(self, events, event_id, file_dir, write=True, write_names=True):
         """
         exports evt and PDG files for sorted events to be read by BESA
@@ -413,7 +530,7 @@ class EEG_Processor:
         subject_event_id = self.get_subject_event_id(events, event_id)
         event_id_cropped = subject_event_id
 
-        #print(len(event_id), len(event_id_cropped))
+        # print(len(event_id), len(event_id_cropped))
         formatted_events = []
         for event in events:
             formatted_events.append(self.format_event(event, event_id_name))
@@ -430,7 +547,7 @@ class EEG_Processor:
         print(error_mssg)
         if self.error_halt:
             input("\033[91mERROR DETECTED!\033[0m halting...            : ")
-    
+
     def sort_events_MOT_BESA(self, events, event_id_name, sfreq=1000):
         self.current_sfreq = sfreq
         trial_block_format = '{}-Tr{}>{}{}'
@@ -445,25 +562,29 @@ class EEG_Processor:
         new_events = []
         new_event_id = {}
         index_dict = {"FX": None, "FLSH": None, "MVE0": None, "MVE1": None}
-        #index_dict = {"FLSH": None, "MVE0": None}
+        # index_dict = {"FLSH": None, "MVE0": None}
         evt_id_stagger = 100
         for c, evt_name in enumerate(index_dict.keys()):
-            num_of_blocks = round(max_expected_trials/trial_block_size)
-            for x in range(1, num_of_blocks+1):
-                name = trial_block_format.format(evt_name, (x-1)*trial_block_size, (x*trial_block_size), corr_desig)
-                new_event_id[name] = ((c + 1) * evt_id_stagger + x - 1 )
+            num_of_blocks = round(max_expected_trials / trial_block_size)
+            for x in range(1, num_of_blocks + 1):
+                name = trial_block_format.format(evt_name, (x - 1) * trial_block_size, (x * trial_block_size),
+                                                 corr_desig)
+                new_event_id[name] = ((c + 1) * evt_id_stagger + x - 1)
 
-            for y in range(x, x+num_of_blocks):
-                name = trial_block_format.format(evt_name, (y-x) * trial_block_size, (y-x+1) * trial_block_size,  miss_desig)
-                new_event_id[name] = ((c + 1) * evt_id_stagger + y + (50-x))
+            for y in range(x, x + num_of_blocks):
+                name = trial_block_format.format(evt_name, (y - x) * trial_block_size, (y - x + 1) * trial_block_size,
+                                                 miss_desig)
+                new_event_id[name] = ((c + 1) * evt_id_stagger + y + (50 - x))
 
         lvl_block_stagger = 700
         for c, evt_name in enumerate(index_dict.keys()):
             evt_id = lvl_block_stagger + c
-            new_event_id[lvl_lss_format.format(evt_name, lvl_cutoff, corr_desig)], new_event_id[lvl_lss_format.format(evt_name, lvl_cutoff, miss_desig)] = evt_id, evt_id + 50
+            new_event_id[lvl_lss_format.format(evt_name, lvl_cutoff, corr_desig)], new_event_id[
+                lvl_lss_format.format(evt_name, lvl_cutoff, miss_desig)] = evt_id, evt_id + 50
         for d, evt_name in enumerate(index_dict.keys()):
             evt_id = lvl_block_stagger + c + d + 1
-            new_event_id[lvl_great_format.format(evt_name, lvl_cutoff+1, corr_desig)], new_event_id[lvl_great_format.format(evt_name, lvl_cutoff+1, miss_desig)] = evt_id, evt_id + 50
+            new_event_id[lvl_great_format.format(evt_name, lvl_cutoff + 1, corr_desig)], new_event_id[
+                lvl_great_format.format(evt_name, lvl_cutoff + 1, miss_desig)] = evt_id, evt_id + 50
 
         for i, event in enumerate(events):
             index_dict.update((k, None) for k in index_dict.keys())
@@ -477,31 +598,33 @@ class EEG_Processor:
                     lvl = '0' + lvl
                 for j, check in enumerate(events[fixation_index + 1:]):
                     if event_id_name[check[2]].startswith('CRC'):
-                        #miss_data_name = 'CR00'
+                        # miss_data_name = 'CR00'
                         corr_or_miss = corr_desig
                         break
                     elif event_id_name[check[2]].startswith('MS'):
-                        #miss_data_name = event_id_name[check[2]]
+                        # miss_data_name = event_id_name[check[2]]
                         corr_or_miss = miss_desig
                         break
-            
+
             for key in index_dict.keys():
                 if event_id_name[event[2]].startswith(key):
                     index_dict[key] = i
 
-            #found_values = [k for k, v in index_dict.items() if v is not None]
+            # found_values = [k for k, v in index_dict.items() if v is not None]
             for evt_name, index in index_dict.items():
                 if index is not None:
                     if event_id_name[events[index + 1][2]].startswith('DIN'):
-                        block_flt = trial/trial_block_size
-                        block = round(block_flt-0.50001)
+                        block_flt = trial / trial_block_size
+                        block = round(block_flt - 0.50001)
 
-                        new_evt_name_trial = trial_block_format.format(evt_name, block*trial_block_size, (block+1)*trial_block_size, corr_or_miss)
+                        new_evt_name_trial = trial_block_format.format(evt_name, block * trial_block_size,
+                                                                       (block + 1) * trial_block_size, corr_or_miss)
                         sample = np.float64(event[0])
                         orders_of_mag = self.temporal_res_freq / self.current_sfreq
                         new_evt_sample = np.int64(sample * orders_of_mag)
-                        new_evt_change_val = events[index+1][1]
-                        new_evt_trial = np.array([new_evt_sample, new_evt_change_val, new_event_id[new_evt_name_trial]], dtype=np.int64)
+                        new_evt_change_val = events[index + 1][1]
+                        new_evt_trial = np.array([new_evt_sample, new_evt_change_val, new_event_id[new_evt_name_trial]],
+                                                 dtype=np.int64)
                         new_events.append(new_evt_trial)
 
                         new_evt_lvl = new_evt_trial.copy()
@@ -510,11 +633,12 @@ class EEG_Processor:
                             new_evt_lvl[2] = new_event_id[new_evt_name_lvl]
                             new_events.append(new_evt_lvl)
                         elif int(lvl) > lvl_cutoff:
-                            new_evt_name_lvl = lvl_great_format.format(evt_name, lvl_cutoff+1, corr_or_miss)
+                            new_evt_name_lvl = lvl_great_format.format(evt_name, lvl_cutoff + 1, corr_or_miss)
                             new_evt_lvl[2] = new_event_id[new_evt_name_lvl]
                             new_events.append(new_evt_lvl)
 
         return new_events, new_event_id
+
     def master_event_id_MOT(self):
         new_event_id = {}  # creates new event_id dict and assigns the 'correct, no misses' event to id:30
 
@@ -550,8 +674,8 @@ class EEG_Processor:
                         evt_name = f'{letter}_{lvl}_{trial}_{ms_val}'
                         new_event_id[evt_name] = len(new_event_id) + 1
 
-        for x in range(0, 10):
-            new_event_id["ERR" + str(x)] = len(new_event_id) + 1
+        # for x in range(0, 10):
+        #     new_event_id["ERR" + str(x)] = len(new_event_id) + 1
 
         return new_event_id
 
@@ -605,10 +729,10 @@ class EEG_Processor:
                 lvl = evt_name.replace('F', '')
                 lvl = lvl.replace('X', '')
                 lvl = f'0{lvl}'[-2:]
-                for j, c_m_evt in enumerate(events[fx_index:fx_index+100]):
+                for j, c_m_evt in enumerate(events[fx_index:fx_index + 100]):
                     curr_samp = c_m_evt[0]
                     fx_samp = events[fx_index][0]
-                    t_diff = (curr_samp - fx_samp)/sfreq
+                    t_diff = (curr_samp - fx_samp) / sfreq
                     if t_diff <= 17:
                         evt_id = c_m_evt[2]
                         c_m_name = event_id_name[evt_id]
@@ -652,13 +776,15 @@ class EEG_Processor:
                                 new_events.append(new_evt)
                                 break
 
-
-
                     index += 1
 
         self.CRMS_errors, self.DIN_errors = CRMS_errors, DIN_errors
-        new_events_arr = np.vstack(new_events)
-        return new_events_arr, new_event_id
+        try:
+            new_events = np.vstack(new_events)
+        except ValueError:
+            mssg = 'WARNING: ValueError caught, need at least one array to concatenate'
+            self.error(mssg)
+        return new_events, new_event_id
 
     def sort_events_Sleep(self, events, events_id_name, file_dir, target_form='Stimulus/S  {}', current_sfreq=10000):
         default_return = [], {}
@@ -812,4 +938,3 @@ class EEG_Processor:
         # and return this as the index we begin with
         start_index = previous_events[-1][0]
         return start_index
-
