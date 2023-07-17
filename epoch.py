@@ -16,7 +16,7 @@ if __name__ == '__main__':
     AP = EEG_Processor(read, write, mne_log=False)
 
     for file in AP.files:
-        events, event_id, info = AP.read_raw_info(file)
+        events, event_id = AP.read_raw_info(file)
         event_id_name = AP.cat_events(event_id)
         new_events, new_event_id = AP.sort_events_MOT(events, event_id_name)
         new_event_id_name = AP.cat_events(new_event_id)
