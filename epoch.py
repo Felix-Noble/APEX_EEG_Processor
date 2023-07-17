@@ -33,36 +33,42 @@ if __name__ == '__main__':
         subject_event_id = AP.get_subject_event_id(new_events, new_event_id)
         subject_event_id_name = AP.cat_events(subject_event_id)
 
-        raw = AP.read_raw_file(file, preload=True)
+        raw = AP.read_raw_file(file, preload=True, filter=True, reference='average')
 
         channels = raw.ch_names
         eeg_channels = channels[0:128]
 
         # raw_eeg = raw.pick_channels(eeg_channels, ordered=False)
-        raw_eeg = mne.add_reference_channels(raw, ref_channels="average")  # sets average reference
-        filtered_raw = AP.filter(raw_eeg, 0.1, 50)
 
         max_trial = AP.get_max_trial(subject_event_id)
         half_point = round((max_trial / 2) - 0.1)
         #print(subject_event_id)
 
         conditions = []
-        # Conditions for correct/miss
-        conditions.append(('CRCT', AP.group_events(subject_event_id, corr_miss='CR')))
-        conditions.append(('MISS', AP.group_events(subject_event_id, corr_miss='MS')))
-        # Conditions above and below lvl 13 correct/miss
-        conditions.append(('CR-lvl lss13', AP.group_events(subject_event_id, corr_miss='CR', lvl=(0, 13))))
-        conditions.append(('CR-lvl grr14', AP.group_events(subject_event_id, corr_miss='CR', lvl=(14, 40))))
-        conditions.append(('MS-lvl lss13', AP.group_events(subject_event_id, corr_miss='MS', lvl=(0, 13))))
-        conditions.append(('MS-lvl grr14', AP.group_events(subject_event_id, corr_miss='MS', lvl=(14, 40))))
+        event_conditions = [
+            ('CRCT', 'CR', None, None),
+            ('MISS', 'MS', None, None),
+            ('CR-lvl lss13', 'CR', (0, 13), None),
+            ('CR-lvl grr14', 'CR', (14, 40), None),
+            ('MS-lvl lss13', 'MS', (0, 13), None),
+            ('MS-lvl grr14', 'MS', (14, 40), None),
+            ('CR-trial-first_half', 'CR', None, (0, half_point)),
+            ('CR-trial-second_half', 'CR', None, (half_point + 1, max_trial)),
+            ('MS-trial-first_half', 'MS', None, (0, half_point)),
+            ('MS-trial-second_half', 'MS', None, (half_point + 1, max_trial))
+        ]
 
-        conditions.append(('CR-trial-first_half', AP.group_events(subject_event_id, corr_miss='CR', trial=(0, half_point))))
-        conditions.append(('CR-trial-second_half', AP.group_events(subject_event_id, corr_miss='CR', trial=(half_point + 1, max_trial))))
-        conditions.append(('MS-trial-first_half', AP.group_events(subject_event_id, corr_miss='MS', trial=(0, half_point))))
-        conditions.append(('MS-trial-second_half', AP.group_events(subject_event_id, corr_miss='MS', trial=(half_point + 1, max_trial))))
+        for condition_info in event_conditions:
+            condition_name = condition_info[0]
+            corr_miss = condition_info[1]
+            lvl_info = condition_info[2]
+            trial_info = condition_info[3]
 
+            conditions.append((condition_name,
+                               AP.group_events(subject_event_id, corr_miss=corr_miss, lvl=lvl_info, trial=trial_info,
+                                               evt='G')))
 
-        AP.epoch(filtered_raw, new_events, conditions, file)
+        AP.epoch_to_csv(raw, new_events, conditions, file, tmin=-2.5, tmax=4.5)
         print('epochs done')
         exit()
 

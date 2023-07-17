@@ -92,7 +92,8 @@ class EEG_Processor:
 
         return subject_files
 
-    def read_raw_file(self, file, preload=False, priority='cropped'):
+    def read_raw_file(self, file, preload=True, priority='cropped', filter=False, reference=None,
+                      low_f=0.1, high_f=50, notch_f=60):
         # Initialize raw as None
         raw = None
         # Extract the base name of the file
@@ -129,9 +130,17 @@ class EEG_Processor:
         except FileNotFoundError:
             print("Missing data in \033[91m{}\033[0m".format(file))
             return None
+
+        if filter:
+            raw = self.filter(raw, low_f, high_f, notch_f=notch_f)
+            print('Filtering raw data...')
+        if reference is not None:
+            raw = mne.add_reference_channels(raw, ref_channels=reference)  # sets average reference
+            print(f'Setting reference to {reference}...')
+
         return raw
 
-    def read_raw_info(self, file):  # TODO add in a messenger function
+    def read_raw_info(self, file, return_info=False, raw=None):  # TODO add in a messenger function
         print('Reading info from {}'.format(self.get_main_filename(file)))
         raw_loaded = False
         main_filename = self.get_main_filename(file)
@@ -139,6 +148,11 @@ class EEG_Processor:
         info_filename = '{}-info.pckl'.format(os.path.join(self.read_dir, main_filename))
         if os.path.exists(evt_filename):
             events = np.load(evt_filename)
+        elif raw is not None:
+            raw = raw
+            raw_loaded = True
+            events = mne.find_events(raw, shortest_event=1)
+            np.save(os.path.join(self.write_dir, evt_filename), events)
         else:
             raw = self.read_raw_file(file)
             raw_loaded = True
@@ -162,14 +176,17 @@ class EEG_Processor:
                 pickle.dump(info, f)
 
         event_id = info['event_id']
-        return events, event_id, info
+        if return_info:
+            return events, event_id, info
+        else:
+            return events, event_id
 
-    def filter(self, data, low, high, power_freq=60):
+    def filter(self, data, low, high, notch_f=60, n_jobs=-1):
         # Apply a notch filter to remove line noise
-        notch_filtered_raw = data.copy().notch_filter(freqs=[power_freq])
+        notch_filtered_raw = data.copy().notch_filter(freqs=[notch_f], n_jobs=n_jobs)
 
         # Apply a band-pass filter to keep frequencies of interest
-        filtered_raw = notch_filtered_raw.copy().filter(l_freq=low, h_freq=high)
+        filtered_raw = notch_filtered_raw.copy().filter(l_freq=low, h_freq=high, n_jobs=n_jobs)
 
         return filtered_raw
 
@@ -335,8 +352,21 @@ class EEG_Processor:
                     group.append(event_id[ID])
 
         return group
+    def epoch(self, data, events, event_groups, tmin=-0.2, tmax=1,
+              proj = True, picks=('eeg', 'eog'), baseline=None, preload = True, event_repeated = 'merge'):
+        if baseline is not None:
+            b_line = (baseline[0], baseline[1])
+        else:
+            b_line = (tmin, tmin + 0.1)
 
-    def epoch(self, data, events, event_groups, file, tmin=-0.2, tmax=1, save=True):
+        epochs_by_condition = []
+        for group in event_groups:
+            epoch = mne.Epochs(data, events, group[1], tmin, tmax, proj=proj,
+                               picks=picks, baseline=b_line, preload=preload, event_repeated=event_repeated)
+            epochs_by_condition.append((group[0], epoch))
+
+        return epochs_by_condition
+    def epoch_to_csv(self, data, events, event_groups, file, tmin=-0.2, tmax=1, save=True):
         """
         should recognise either a tuple/list of lists or a dictionary, giving either numerical names or names specified in the dict
         """
@@ -344,7 +374,7 @@ class EEG_Processor:
             if len(group[1]) == 0:
                 continue
             epoch = mne.Epochs(data, events, group[1], tmin, tmax, proj=True,
-                                    picks=('eeg', 'eog'), baseline=(tmin, tmin + 0.1), preload=True)
+                                    picks=('eeg', 'eog'), baseline=(tmin, tmin + 0.1), preload=True,  event_repeated='merge')
             csv_path = r"C:\Users\Felix\Dropbox\My PC (LAPTOP-J41MAND4)\Users\Felix\Documents\Philosophy+\Cognitive science\Aptima Coding\data\epochs as csv"
             epoch_df = epoch.to_data_frame()
             filename = f'{self.get_main_filename(file)}-{group[0]}.csv'
@@ -353,6 +383,15 @@ class EEG_Processor:
                     {}   
                     Epoch written to \033[93m{}\033[0m in \033[92m{}\033[0m
                                     """.format(datetime.now(), filename, csv_path))
+            evoked = epoch.average()
+            evoked_df = evoked.to_data_frame()
+            filename = f'{self.get_main_filename(file)}-{group[0]}-evoked.csv'
+            evoked_df.to_csv(f'{csv_path}\{filename}', index=False)
+            print("""---
+                                {}   
+                                Epoch written to \033[93m{}\033[0m in \033[92m{}\033[0m
+                                                """.format(datetime.now(), filename, csv_path))
+
     def get_max_trial(self, subject_event_id):
         max_trial = 0
         subject_event_id = dict(subject_event_id)
