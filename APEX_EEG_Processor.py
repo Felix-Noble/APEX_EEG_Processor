@@ -366,6 +366,7 @@ class EEG_Processor:
             epochs_by_condition.append((group[0], epoch))
 
         return epochs_by_condition
+
     def epoch_to_csv(self, data, events, event_groups, file, tmin=-0.2, tmax=1, save=True):
         """
         should recognise either a tuple/list of lists or a dictionary, giving either numerical names or names specified in the dict
@@ -374,23 +375,24 @@ class EEG_Processor:
             if len(group[1]) == 0:
                 continue
             epoch = mne.Epochs(data, events, group[1], tmin, tmax, proj=True,
-                                    picks=('eeg', 'eog'), baseline=(tmin, tmin + 0.1), preload=True,  event_repeated='merge')
-            csv_path = r"C:\Users\Felix\Dropbox\My PC (LAPTOP-J41MAND4)\Users\Felix\Documents\Philosophy+\Cognitive science\Aptima Coding\data\epochs as csv"
+                               picks=('eeg', 'eog'), baseline=(tmin, tmin + 0.1), preload=True, event_repeated='merge')
+            # csv_path = r"C:\Users\Felix\Dropbox\My PC (LAPTOP-J41MAND4)\Users\Felix\Documents\Philosophy+\Cognitive science\Aptima Coding\data\epochs as csv"
             epoch_df = epoch.to_data_frame()
             filename = f'{self.get_main_filename(file)}-{group[0]}.csv'
-            epoch_df.to_csv(f'{csv_path}\{filename}', index=False)
+            epoch_df.to_csv(f'{self.write_dir}\{filename}', index=False)
             print("""---
                     {}   
-                    Epoch written to \033[93m{}\033[0m in \033[92m{}\033[0m
-                                    """.format(datetime.now(), filename, csv_path))
-            evoked = epoch.average()
-            evoked_df = evoked.to_data_frame()
-            filename = f'{self.get_main_filename(file)}-{group[0]}-evoked.csv'
-            evoked_df.to_csv(f'{csv_path}\{filename}', index=False)
+                    Epochs written to \033[93m{}\033[0m in \033[92m{}\033[0m
+                                    """.format(datetime.now(), filename, self.write_dir))
+
+            avg = epoch.average()
+            avg_df = avg.to_data_frame()
+            filename = f'{self.get_main_filename(file)}-{group[0]}-AVG.csv'
+            avg_df.to_csv(f'{self.write_dir}\{filename}', index=False)
             print("""---
-                                {}   
-                                Epoch written to \033[93m{}\033[0m in \033[92m{}\033[0m
-                                                """.format(datetime.now(), filename, csv_path))
+                     {}   
+                     Epochs written to \033[93m{}\033[0m in \033[92m{}\033[0m
+                                               """.format(datetime.now(), filename, self.write_dir))
 
     def get_max_trial(self, subject_event_id):
         max_trial = 0
