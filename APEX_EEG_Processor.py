@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from datetime import datetime
+import matplotlib.pyplot as plt
 
 
 class EEG_Processor:
@@ -47,8 +48,8 @@ class EEG_Processor:
                 self.files = json.load(file)
                 print(self.files)
         elif self.read_dir is not None:
-            self.files = []
-            self.find_subject_files()
+            self.files = self.find_subject_files()
+            self.subj_csv_files = self.find_csv_files()
         else:
             pass
 
@@ -87,11 +88,28 @@ class EEG_Processor:
 
         subject_files = sorted(subject_files)
         subject_identifications = sorted(subject_identifications)
-        self.files = subject_files
-        print("File/s found: {}".format(subject_files))
+        #self.files = subject_files
+        print("EEG File/s found: {}".format(subject_files))
 
         return subject_files
 
+    def find_csv_files(self, org_by_subj=False):
+        csv_files_by_subj = {}
+        csv_files = []
+        for file in os.listdir(self.read_dir):
+            if file.endswith('.csv'):
+                subject = self.get_main_filename(file)
+                subject = subject.split('-')[0]
+                if subject not in csv_files_by_subj:
+                    csv_files_by_subj[subject] = []
+                else:
+                    csv_files_by_subj[subject].append(f'{self.read_dir}\{file}')
+                csv_files.append(f'{self.read_dir}\{file}')
+        print(f'csv files found, by subject: {csv_files_by_subj}')
+        if org_by_subj:
+            return csv_files_by_subj
+        else:
+            return csv_files
     def read_raw_file(self, file, preload=True, priority='cropped', filter=False, reference=None,
                       low_f=0.1, high_f=50, notch_f=60):
         # Initialize raw as None
@@ -367,6 +385,12 @@ class EEG_Processor:
 
         return epochs_by_condition
 
+    def evoked(self, epoched_conditions):
+        evoked_conditions = []
+        for condition in epoched_conditions:
+            evoked_conditions.append((condition[0], condition[1].average()))
+
+        return evoked_conditions
     def epoch_to_csv(self, data, events, event_groups, file, tmin=-0.2, tmax=1, save=True):
         """
         should recognise either a tuple/list of lists or a dictionary, giving either numerical names or names specified in the dict
@@ -394,6 +418,30 @@ class EEG_Processor:
                      Epochs written to \033[93m{}\033[0m in \033[92m{}\033[0m
                                                """.format(datetime.now(), filename, self.write_dir))
 
+    def gfp(self, timeslice):
+        sum = 0
+        count = 0
+        for value in timeslice:
+            sum += (value ** 2)
+            count += 1
+
+        mean_sqr = sum / count
+        gfp = np.sqrt(mean_sqr)
+
+        return gfp
+
+    def global_diss(self, u, v):
+        u_unit = np.sqrt(sum([x**2 for x in u]))
+        v_unit = np.sqrt(sum([y**2 for y in v]))
+        val = 0
+        for i, x in enumerate(u):
+            val += (x*v[i])
+        C = val/(u_unit*v_unit)
+
+        diss = np.sqrt(2*(1-C))
+
+        return diss
+
     def get_max_trial(self, subject_event_id):
         max_trial = 0
         subject_event_id = dict(subject_event_id)
@@ -414,6 +462,75 @@ class EEG_Processor:
                 max_lvl = lvl
 
         return max_lvl
+
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    def plot_data(self, xvar=None, yvar=None, xlabel=None, ylabel=None, title=None, legend=None, error_bars=False, t_range=None):
+        # Ensure yvar is a list or tuple
+        if not isinstance(yvar, (list, tuple)):
+            raise ValueError('yvar should be a list or tuple')
+
+        # Ensure labels and title are strings, if provided
+        if xlabel is not None and not isinstance(xlabel, str):
+            raise ValueError('xlabel should be a string')
+        if ylabel is not None and not isinstance(ylabel, str):
+            raise ValueError('ylabel should be a string')
+        if title is not None and not isinstance(title, str):
+            raise ValueError('title should be a string')
+
+        # Generate a time vector for the x-variable if it is not provided
+        if xvar is None:
+            xvar = np.arange(len(yvar[0]))
+        if xvar is None and t_range is not None:
+            xvar = np.arange(t_range[0], t_range[1], len(yvar[0]))
+
+        # Get colormap
+        cmap = plt.get_cmap('viridis')
+
+        # Generate a list of colors from the color map
+        num_colors = len(yvar)
+        colors = [cmap(i) for i in np.linspace(0, 1, num_colors)]
+
+        # Create the plot
+        fig, ax = plt.subplots()
+
+        # Plot each yvar
+        for i, var in enumerate(yvar):
+            color = colors[i] if colors and i < len(colors) else None
+
+            # Plot the line
+            ax.plot(xvar, var, label=legend[i] if legend and i < len(legend) else None, color=color)
+
+            # If error bars are requested, plot them with a different alpha
+            if error_bars:
+                std_dev = np.std(var)
+                (_, caps, _) = ax.errorbar(xvar, var, yerr=std_dev, color=color, capsize=5, alpha=0.2)
+
+        # Set labels and title if provided
+        if xlabel:
+            ax.set_xlabel(xlabel)
+        if ylabel:
+            ax.set_ylabel(ylabel)
+        if title:
+            ax.set_title(title)
+
+        # Show the legend if legend labels are provided
+        if legend:
+            ax.legend()
+
+        # Show the plot
+        plt.show()
+
     def format_event(self, event, event_id_name, BESA_evt_code=1, event_comment='Trigger', comment_delim='-'):
         # Formats the events given into a single line of an evt file.
         # trigger_num is the trigger identifier BESA will use,
@@ -438,7 +555,7 @@ class EEG_Processor:
 
         return main_filename
 
-    def extract_identity(self, filename):
+    def identify(self, filename):
         split = [char for char in filename]
         numbers = []
         for char in split:
@@ -831,7 +948,7 @@ class EEG_Processor:
         default_return = [], {}
         self.current_sfreq = current_sfreq
         main_filename = self.get_main_filename(file_dir)
-        identi1 = self.extract_identity(main_filename)
+        identi1 = self.identify(main_filename)
         # raw = self.read_raw_file(file_dir)
         # if raw is not None:
         #     self.current_sfreq = raw.info['sfreq']
@@ -861,7 +978,7 @@ class EEG_Processor:
 
         csv_file_list = [file for file in os.listdir(self.read_dir) if file.endswith('.csv')]
         for csv_file in csv_file_list:
-            identi2 = self.extract_identity(csv_file)
+            identi2 = self.identify(csv_file)
             if len(identi2) < 1:
                 continue
             if identi1 == identi2:
