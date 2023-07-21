@@ -10,6 +10,7 @@ class EEG_Processor:
     def __init__(self, read_dir=None, write_dir=None, temporal_res=('Tmu', 1000000),
                  run=False, error_halt=False, load_file_list=False,
                  evt_ext='.evt', paradigm_ext='.PDG', error_ext='.txt',
+                 event_id_master=None,
                  designators=['Subj'], mne_log='WARNING'):
         print('Initialising APEX_EEG_Processor...')
         mne.set_log_level(mne_log)
@@ -52,6 +53,9 @@ class EEG_Processor:
             self.subj_csv_files = self.find_csv_files()
         else:
             pass
+
+        if event_id_master == 'MOT':
+            self.master_event_id = self.master_event_id_MOT()
 
     def find_subject_files(self, priority='_cropped'):
         try:
@@ -398,26 +402,34 @@ class EEG_Processor:
         for group in event_groups:
             if len(group[1]) == 0:
                 continue
+        # subj_event_groups = []
+        # evt_ids = []
+        # for event in events:
+        #     evt_ids.append(event[2])
+        #
+        # for cond in event_groups:
+        #     if cond in evt_ids:
+        #         subj_event_groups.append(cond)
+
             epoch = mne.Epochs(data, events, group[1], tmin, tmax, proj=True,
                                picks=('eeg', 'eog'), baseline=(tmin, tmin + 0.1), preload=True, event_repeated='merge')
             # csv_path = r"C:\Users\Felix\Dropbox\My PC (LAPTOP-J41MAND4)\Users\Felix\Documents\Philosophy+\Cognitive science\Aptima Coding\data\epochs as csv"
-            epoch_df = epoch.to_data_frame()
-            filename = f'{self.get_main_filename(file)}-{group[0]}.csv'
-            epoch_df.to_csv(f'{self.write_dir}\{filename}', index=False)
-            print("""---
-                    {}   
-                    Epochs written to \033[93m{}\033[0m in \033[92m{}\033[0m
-                                    """.format(datetime.now(), filename, self.write_dir))
+            # epoch_df = epoch.to_data_frame()
+            # filename = f'{self.get_main_filename(file)}-{group[0]}.csv'
+            # epoch_df.to_csv(f'{self.write_dir}\{filename}', index=False)
+            # print("""---
+            #         {}
+            #         Epochs written to \033[93m{}\033[0m in \033[92m{}\033[0m
+            #                         """.format(datetime.now(), filename, self.write_dir))
 
             avg = epoch.average()
             avg_df = avg.to_data_frame()
-            filename = f'{self.get_main_filename(file)}-{group[0]}-AVG.csv'
+            filename = f'{self.get_main_filename(file)}--{group[0]}-evoked.csv'
             avg_df.to_csv(f'{self.write_dir}\{filename}', index=False)
             print("""---
                      {}   
                      Epochs written to \033[93m{}\033[0m in \033[92m{}\033[0m
                                                """.format(datetime.now(), filename, self.write_dir))
-
     def gfp(self, timeslice):
         sum = 0
         count = 0
@@ -462,18 +474,6 @@ class EEG_Processor:
                 max_lvl = lvl
 
         return max_lvl
-
-    import matplotlib.pyplot as plt
-    import numpy as np
-
-    import matplotlib.pyplot as plt
-    import numpy as np
-
-    import numpy as np
-    import matplotlib.pyplot as plt
-
-    import matplotlib.pyplot as plt
-    import numpy as np
 
     def plot_data(self, xvar=None, yvar=None, xlabel=None, ylabel=None, title=None, legend=None, error_bars=False, t_range=None):
         # Ensure yvar is a list or tuple

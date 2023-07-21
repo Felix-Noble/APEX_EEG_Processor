@@ -43,20 +43,24 @@ if __name__ == '__main__':
         max_trial = AP.get_max_trial(subject_event_id)
         half_point = round((max_trial / 2) - 0.1)
         #print(subject_event_id)
-
+        
         conditions = []
-        event_conditions = [
-            ('CRCT', 'CR', None, None),
-            ('MISS', 'MS', None, None),
-            ('CR-lvl lss13', 'CR', (0, 13), None),
-            ('CR-lvl grr14', 'CR', (14, 40), None),
-            ('MS-lvl lss13', 'MS', (0, 13), None),
-            ('MS-lvl grr14', 'MS', (14, 40), None),
-            ('CR-trial-first_half', 'CR', None, (0, half_point)),
-            ('CR-trial-second_half', 'CR', None, (half_point + 1, max_trial)),
-            ('MS-trial-first_half', 'MS', None, (0, half_point)),
-            ('MS-trial-second_half', 'MS', None, (half_point + 1, max_trial))
-        ]
+        # event_conditions = [
+        #     ('CRCT', 'CR', None, None),
+        #     ('MISS', 'MS', None, None),
+        #     ('CR-lvl lss13', 'CR', (0, 13), None),
+        #     ('CR-lvl grr14', 'CR', (14, 40), None),
+        #     ('MS-lvl lss13', 'MS', (0, 13), None),
+        #     ('MS-lvl grr14', 'MS', (14, 40), None),
+        #     ('CR-trial-first_half', 'CR', None, (0, half_point)),
+        #     ('CR-trial-second_half', 'CR', None, (half_point + 1, max_trial)),
+        #     ('MS-trial-first_half', 'MS', None, (0, half_point)),
+        #     ('MS-trial-second_half', 'MS', None, (half_point + 1, max_trial))
+        # ]
+        event_conditions = []
+        for x in range(13, 40):
+            event_conditions.append((f'CR-lvl{x}', 'CR', x, None))
+            event_conditions.append((f'MS-lvl{x}', 'MS', x, None))
 
         for condition_info in event_conditions:
             condition_name = condition_info[0]
@@ -70,7 +74,6 @@ if __name__ == '__main__':
 
         AP.epoch_to_csv(raw, new_events, conditions, file, tmin=-2.5, tmax=4.5)
         print('epochs done')
-        exit()
 
         # corr_avg = corr_epoch.average()
         # miss_avg = miss_epoch.average()
