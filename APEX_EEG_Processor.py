@@ -5,12 +5,11 @@ from pathlib import Path
 from datetime import datetime
 import matplotlib.pyplot as plt
 
-
 class EEG_Processor:
     def __init__(self, read_dir=None, write_dir=None, temporal_res=('Tmu', 1000000),
                  run=False, error_halt=False, load_file_list=False,
                  evt_ext='.evt', paradigm_ext='.PDG', error_ext='.txt',
-                 event_id_master=None,
+                 event_id_master=None, csv_files='list',
                  designators=['Subj'], mne_log='WARNING'):
         print('Initialising APEX_EEG_Processor...')
         mne.set_log_level(mne_log)
@@ -50,7 +49,10 @@ class EEG_Processor:
                 print(self.files)
         elif self.read_dir is not None:
             self.files = self.find_subject_files()
-            self.subj_csv_files = self.find_csv_files()
+            if csv_files == 'subj' or csv_files == 'subject':
+                self.subj_csv_files = self.find_csv_files(order_by_subj=True)
+            elif csv_files == 'list':
+                self.csv_files = self.find_csv_files(order_by_subj=False)
         else:
             pass
 
@@ -97,7 +99,7 @@ class EEG_Processor:
 
         return subject_files
 
-    def find_csv_files(self, org_by_subj=False):
+    def find_csv_files(self, order_by_subj=False):
         csv_files_by_subj = {}
         csv_files = []
         for file in os.listdir(self.read_dir):
@@ -109,11 +111,28 @@ class EEG_Processor:
                 else:
                     csv_files_by_subj[subject].append(f'{self.read_dir}\{file}')
                 csv_files.append(f'{self.read_dir}\{file}')
-        print(f'csv files found, by subject: {csv_files_by_subj}')
-        if org_by_subj:
+        if order_by_subj:
             return csv_files_by_subj
+            print(f'csv files found, by subject: {csv_files_by_subj}')
+
         else:
+            print(f'csv files found: {csv_files}')
             return csv_files
+
+    def organise_files(self, filenames):
+        files_dict = {}
+        for filename in filenames:
+            f = self.get_main_filename(filename)
+            f = f.split('-')
+            # The condition name starts from the second part of the filename
+            condition = "-".join(f[1:])  # Skip subject ID
+            if condition not in files_dict:
+                # If this is the first time we've seen this condition, initialize the list
+                files_dict[condition] = []
+            # Add the full filename to the list of files for this condition if it's not already there
+            if filename not in files_dict[condition]:
+                files_dict[condition].append(filename)
+        return files_dict
     def read_raw_file(self, file, preload=True, priority='cropped', filter=False, reference=None,
                       low_f=0.1, high_f=50, notch_f=60):
         # Initialize raw as None
@@ -837,7 +856,7 @@ class EEG_Processor:
 
         return new_event_id
 
-    def sort_events_MOT(self, events, event_id_name, sfreq=1000):
+    def sort_events_MOT(self, events, event_id, sfreq=1000):
         """
         every 20 trials, separate bin
         lvl 13 below lvl 14 and above
@@ -862,7 +881,7 @@ class EEG_Processor:
         new_events = []
         self.master_event_id = self.master_event_id_MOT()
         event_letter_codes = self.event_letter_codes
-
+        event_id_name = self.cat_events(event_id)
         new_event_id = self.master_event_id
         new_event_id_name = self.cat_events(new_event_id)
 
@@ -942,7 +961,8 @@ class EEG_Processor:
         except ValueError:
             mssg = 'WARNING: ValueError caught, need at least one array to concatenate'
             self.error(mssg)
-        return new_events, new_event_id
+        subject_event_id = self.get_subject_event_id(new_events, new_event_id)
+        return new_events, subject_event_id
 
     def sort_events_Sleep(self, events, events_id_name, file_dir, target_form='Stimulus/S  {}', current_sfreq=10000):
         default_return = [], {}
