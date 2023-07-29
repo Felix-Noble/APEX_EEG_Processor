@@ -22,7 +22,7 @@ if __name__ == '__main__':
     coords_loc = r"C:\Users\Felix\Dropbox\My PC (LAPTOP-J41MAND4)\Users\Felix\Documents\Philosophy+\Cognitive science\Aptima Coding\Classifyers\helpers\Electrode xyz.json"
     with open(coords_loc, 'r') as file:
         coords = json.load(file)
-    channel_select = r"C:\Users\Felix\Dropbox\My PC (LAPTOP-J41MAND4)\Users\Felix\Documents\Philosophy+\Cognitive science\Aptima Coding\Classifyers\helpers\Channel select.json"
+    channel_select = r"C:\Users\Felix\Dropbox\My PC (LAPTOP-J41MAND4)\Users\Felix\Documents\Philosophy+\Cognitive science\Aptima Coding\Classifyers\helpers\channels.json"
     with open(channel_select, 'r') as file:
         channels = json.load(file)
 
@@ -79,21 +79,30 @@ if __name__ == '__main__':
             event_lookup = {events_lookup} \n
             Press any key to start simulation...\n''')
 
-        print(f'Starting MOT simulation with {subject}: \n')
-        stream = MockRtClient(raw)
+        rt_client = MockRtClient(raw)
+        tmin = epoch_interval[0]
+        tmax = epoch_interval[1]
+        t_end = raw.n_times / raw.info['sfreq']
 
-        # cycle through the events that have been found and return the epochs
-        for tup in epoch_order:
+        picks = ['eeg']
+        eeg_channels = [f'E{x}' for x in range(1, 129)] + ['VREF']
+        rt_epochs = RtEpochs(rt_client, [x[0] for x in epoch_order], tmin, tmax, baseline=(tmin, tmin+0.1),picks=picks, isi_max=4.0)
+        rt_epochs.start()
+        print(f'Starting MOT simulation with {subject}: \n')
+        print('sending data to client...')
+        rt_client.send_data(rt_epochs, picks, tmin=0, tmax=200, buffer_size=100)
+        print('data sent. \n')
+        # cycle through the events that have been found and sent to the client
+
+        for ev_num, ev in enumerate(rt_epochs.iter_evoked()):
+
             # take a timestamp at the start of processing
             proc_str = datetime.now()
-            label = tup[2]
-            evt_time = tup[1]
-            t_start = evt_time + epoch_interval[0]
-            t_end = evt_time + epoch_interval[1]
-            epoch = stream.get_event_data(tup[0], t_start, t_end).T
+            label = epoch_order[ev_num][2]
 
+            epoch = ev.data.T
             # turn the epoch into a vector categorising the features
-            df = pd.DataFrame(epoch, columns=raw.ch_names)
+            df = pd.DataFrame(epoch, columns=eeg_channels)
             vec_store = []
             columns = [ch for ch in df.columns if ch in channels]
             for ch in columns:
@@ -114,6 +123,7 @@ if __name__ == '__main__':
                 prediction = classifier.predict(input_vector)
             except ValueError:
                 prediction = None
+                print('failed to make suitible vector!')
             # take a timestamp at the end of processing
             proc_fin = datetime.now()
 
@@ -128,8 +138,8 @@ if __name__ == '__main__':
             elif prediction != label:
                 accuracy = 0
             stats['accuracy'].append(accuracy)
-
-with open(f'{str(datetime.now()).replace(":", ".")}stats.pkl', 'wb') as file:
+stats_f = r"C:\Users\Felix\Dropbox\My PC (LAPTOP-J41MAND4)\Users\Felix\Documents\Philosophy+\Cognitive science\Aptima Coding\Classifyers\stats"
+with open(f'{stats_f}\\{str(datetime.now()).replace(":", ".")}-stats.pkl', 'wb') as file:
     pickle.dump(stats, file)
 
 
